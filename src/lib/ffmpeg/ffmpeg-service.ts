@@ -12,30 +12,34 @@ class FFmpegService {
 	async load(onProgress?: (progress: number) => void) {
 		if (this.loaded) return;
 
-		this.ffmpeg = new FFmpeg();
-		this.abortController = new AbortController();
-		
 		try {
-			// Set up progress handling
-			this.ffmpeg.on('progress', ({ progress }) => {
-				onProgress?.(Math.round(progress * 100));
-			});
+			console.log('Creating new FFmpeg instance...');
+			this.ffmpeg = new FFmpeg();
+			this.abortController = new AbortController();
 
 			this.ffmpeg.on('log', ({ message }) => {
 				console.log('FFmpeg Log:', message);
 			});
 
-			await this.ffmpeg.load({
-				coreURL: '/ffmpeg/ffmpeg-core.js',
-				wasmURL: '/ffmpeg/ffmpeg-core.wasm'
+			this.ffmpeg.on('progress', ({ progress }) => {
+				console.log('FFmpeg Progress:', Math.round(progress * 100), '%');
+				onProgress?.(Math.round(progress * 100));
 			});
 
-			
+			console.log('Loading FFmpeg core...');
+			await this.ffmpeg.load({
+				coreURL: await toBlobURL(`${window.location.origin}/ffmpeg/ffmpeg-core.js`, 'text/javascript'),
+				wasmURL: await toBlobURL(`${window.location.origin}/ffmpeg/ffmpeg-core.wasm`, 'application/wasm')
+			});
+
+
+			console.log('FFmpeg loaded successfully');
 			this.loaded = true;
+
 		} catch (error) {
 			console.error('FFmpeg load error:', error);
 			this.cleanup();
-			throw new Error(`FFmpeg failed to load. Please ensure you have a stable internet connection and try again. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			throw error;
 		}
 	}
 
@@ -51,58 +55,92 @@ class FFmpegService {
 			quality: 85
 		}
 	): Promise<Blob> {
-		if (!this.ffmpeg) throw new Error('FFmpeg not loaded');
+		if (!this.ffmpeg) {
+			throw new Error('FFmpeg not loaded');
+		}
 
 		const inputFileName = 'input.png';
 		const outputFileName = `output.${settings.format}`;
 
 		try {
+			// Write input file
 			onProgress?.(0, 'Preparing input');
+			console.log('Writing input file...');
 			const fileData = await fetchFile(imageFile);
 			await this.ffmpeg.writeFile(inputFileName, fileData);
 
+			// Generate filter complex
 			onProgress?.(20, 'Configuring effect');
 			const filterComplex = this.generateFilterComplex(effect, settings);
+			console.log('Filter complex:', filterComplex);
 			
+			// Generate and execute FFmpeg command
 			onProgress?.(30, 'Processing video');
 			const command = [
 				'-y',
+				'-loop', '1',
+				'-framerate', settings.fps.toString(),
 				'-i', inputFileName,
 				'-filter_complex', filterComplex,
 				'-t', effect.params.duration.toString(),
 				'-c:v', settings.format === 'mp4' ? 'libx264' : 'libvpx',
-				'-b:v', `${settings.quality}M`,
+				'-preset', 'ultrafast',
+				'-tune', 'stillimage',
 				'-pix_fmt', 'yuv420p',
+				'-crf', '23',
 				'-movflags', '+faststart',
 				outputFileName
 			];
 
+			console.log('Executing FFmpeg command:', command.join(' '));
 			await this.ffmpeg.exec(command);
-			onProgress?.(90, 'Finalizing');
 
-			const data = await this.ffmpeg.readFile(outputFileName);
-			onProgress?.(95, 'Cleaning up');
+			// Read output file
+			onProgress?.(90, 'Reading output file');
+			const outputData = await this.ffmpeg.readFile(outputFileName);
+			if (!outputData) {
+				throw new Error('Failed to read output file');
+			}
 
-			// Cleanup
-			await this.cleanup();
+			// Create video blob
+			const uint8Array = outputData instanceof Uint8Array ? outputData : new Uint8Array(Buffer.from(outputData));
+			console.log('Output file size:', uint8Array.length, 'bytes');
+
+			const mimeType = settings.format === 'mp4' ? 'video/mp4' : 'video/webm';
+			const blob = new Blob([uint8Array], { type: mimeType });
+			console.log('Created blob size:', blob.size, 'bytes');
+
+			if (blob.size === 0) {
+				throw new Error('Generated video blob is empty');
+			}
+
 			onProgress?.(100, 'Complete');
-
-			return new Blob([data], { type: `video/${settings.format}` });
+			return blob;
 		} catch (error) {
+			console.error('Video generation error:', error);
+			throw error;
+		} finally {
 			await this.cleanup();
-			throw new Error(`Video generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
 		}
+
+
 	}
 
 	private async cleanup() {
 		if (!this.ffmpeg) return;
 
-		try {
-			await this.ffmpeg.deleteFile('input.png');
-			await this.ffmpeg.deleteFile('output.mp4');
-			await this.ffmpeg.deleteFile('output.webm');
-		} catch (error) {
-			console.error('Cleanup error:', error);
+		const filesToClean = ['input.png', 'output.mp4', 'output.webm'];
+		
+		for (const file of filesToClean) {
+			try {
+				const exists = await this.ffmpeg.readFile(file).then(() => true).catch(() => false);
+				if (exists) {
+					await this.ffmpeg.deleteFile(file);
+					console.log(`Cleaned up ${file}`);
+				}
+			} catch (error) {
+				console.warn(`Failed to clean up ${file}:`, error);
+			}
 		}
 	}
 
@@ -113,17 +151,36 @@ class FFmpegService {
 
 	private generateFilterComplex(effect: VideoEffect, settings: ExportSettings): string {
 		const { type, params } = effect;
-		const { duration, intensity = 50 } = params;
+		const { duration, intensity = 50, easing = 'LINEAR' } = params;
 		const fps = settings.fps;
 		
+		// Base scaling filter with pixel format and framerate
+		const baseFilter = `[0:v]fps=${fps},scale=${settings.width}:${settings.height},format=yuv420p`;
+		
+		// Easing function for animations
+		const getEasing = (t: string) => {
+			switch (easing) {
+				case 'EASE_IN': return `pow(${t},2)`;
+				case 'EASE_OUT': return `1-pow(1-${t},2)`;
+				case 'EASE_IN_OUT': return `if(lt(${t},0.5),2*pow(${t},2),1-pow(-2*${t}+2,2)/2)`;
+				default: return t;
+			}
+		};
+
 		switch (type) {
-			case 'ZOOM':
+			case 'ZOOM': {
 				const zoomFactor = params.direction === 'IN' ? '1.5' : '0.6';
-				return `[0:v]scale=${settings.width}:${settings.height},zoompan=z='${zoomFactor}':d=${duration*fps}:s=${settings.width}x${settings.height}[v]`;
+				const t = `t/${duration}`;
+				const zoomExpr = getEasing(t);
+				return `${baseFilter},zoompan=z='${zoomFactor}+${zoomExpr}':d=${duration*fps}:s=${settings.width}x${settings.height}[v]`;
+			}
 			
-			case 'PAN':
+			case 'PAN': {
+				const t = `t/${duration}`;
+				const panExpr = getEasing(t);
 				const panDirection = this.getPanExpression(params.direction || 'LEFT', duration);
-				return `[0:v]scale=${settings.width}:${settings.height},crop=w=iw:h=ih:x='${panDirection}':y=0[v]`;
+				return `${baseFilter},crop=w=iw:h=ih:x='${panDirection}*${panExpr}':y=0[v]`;
+			}
 			
 			case 'PARALLAX':
 				const speed = intensity / 100;
@@ -150,16 +207,16 @@ class FFmpegService {
 				return `[0:v]scale=${settings.width}:${settings.height},zoompan=z='min(max(1,1+(t/${duration})*${zoomRange}),${zoomRange})':x='iw/2-(iw/zoom/2)+sin(t/${duration}*PI)*${panRange}':y='ih/2-(ih/zoom/2)+cos(t/${duration}*PI)*${panRange}':d=${duration*fps}:s=${settings.width}x${settings.height}[v]`;
 			
 			default:
-				return `[0:v]scale=${settings.width}:${settings.height}[v]`;
+				return `${baseFilter}[v]`;
 		}
 	}
 
 	private getPanExpression(direction: string, duration: number): string {
 		switch (direction) {
-			case 'LEFT': return '(iw-ow)*t/duration';
-			case 'RIGHT': return '(iw-ow)*(1-t/duration)';
-			case 'UP': return '(ih-oh)*t/duration';
-			case 'DOWN': return '(ih-oh)*(1-t/duration)';
+			case 'LEFT': return `(iw-ow)*t/${duration}`;
+			case 'RIGHT': return `(iw-ow)*(1-t/${duration})`;
+			case 'UP': return `(ih-oh)*t/${duration}`;
+			case 'DOWN': return `(ih-oh)*(1-t/${duration})`;
 			default: return '0';
 		}
 	}

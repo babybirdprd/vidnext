@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { ExportSettings, ExportPreset, EXPORT_PRESETS } from '@/types/effects';
+import type { ExportSettings as ExportSettingsType } from '@/types/effects';
+import { EXPORT_PRESETS } from '@/types/effects';
 
 interface ExportSettingsProps {
-	settings: ExportSettings;
-	onSettingsChange: (settings: ExportSettings) => void;
+	settings: ExportSettingsType;
+	onSettingsChange: (settings: ExportSettingsType) => void;
 	disabled?: boolean;
 }
 

@@ -9,14 +9,16 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@ffmpeg/core": "^0.12.6",
+    "@ffmpeg/core": "^0.12.10",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
+    "@types/react-resizable": "^3.0.8",
     "daisyui": "^4.12.23",
     "next": "14.2.24",
     "react": "^18",
     "react-dom": "^18",
     "react-dropzone": "^14.3.5",
+    "react-resizable": "^3.0.5",
     "zod": "^3.24.2"
   },
   "devDependencies": {
