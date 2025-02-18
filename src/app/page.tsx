@@ -1,101 +1,178 @@
-import Image from "next/image";
+'use client';
+
+import { useState } from 'react';
+import { ImageUpload } from '@/components/ui/ImageUpload';
+import { EffectSelector } from '@/components/effects/EffectSelector';
+import { EffectPreview } from '@/components/ui/EffectPreview';
+import { VideoEffect, ExportSettings } from '@/types/effects';
+import { ffmpegService } from '@/lib/ffmpeg/ffmpeg-service';
+
+const defaultExportSettings: ExportSettings = {
+  width: 1920,
+  height: 1080,
+  fps: 30,
+  format: 'mp4',
+  quality: 85
+};
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [selectedEffect, setSelectedEffect] = useState<VideoEffect | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ percent: number; stage: string } | null>(null);
+  const [exportSettings, setExportSettings] = useState<ExportSettings>(defaultExportSettings);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const handleImageSelect = (file: File) => {
+    setSelectedImage(file);
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    setError(null);
+  };
+
+  const handleExport = async () => {
+    if (!selectedImage || !selectedEffect) return;
+    
+    setIsProcessing(true);
+    setError(null);
+    setProgress({ percent: 0, stage: 'Initializing FFmpeg' });
+
+    try {
+      await ffmpegService.load((percent) => {
+        setProgress(prev => ({ ...prev!, percent }));
+      });
+
+        const blob = await ffmpegService.generateVideo(
+        selectedImage,
+        selectedEffect,
+        (percent, stage) => {
+          setProgress({ percent, stage });
+        },
+        exportSettings
+        );
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `video_${Date.now()}.${exportSettings.format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      setProgress({ percent: 100, stage: 'Export complete!' });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred during export');
+    } finally {
+      setIsProcessing(false);
+      setTimeout(() => setProgress(null), 3000);
+    }
+  };
+
+  return (
+    <main className="min-h-screen p-8 bg-base-100">
+      <div className="container mx-auto max-w-6xl">
+        <header className="mb-8">
+          <h1 className="text-4xl font-bold">Image to Video Converter</h1>
+          <p className="text-base-content/70">Transform your images into dynamic videos with custom effects</p>
+        </header>
+        
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+          <div className="space-y-8">
+            <div className="card bg-base-200 shadow-lg">
+              <div className="card-body">
+                <h2 className="card-title">Upload Image</h2>
+                <ImageUpload onImageSelect={handleImageSelect} />
+              </div>
+            </div>
+
+            <div className="card bg-base-200 shadow-lg">
+              <div className="card-body">
+                <h2 className="card-title">Effect Settings</h2>
+                <EffectSelector 
+                  onEffectChange={(effect) => {
+                    setSelectedEffect(effect);
+                    setError(null);
+                  }} 
+                  disabled={!selectedImage || isProcessing}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="card bg-base-200 shadow-lg">
+            <div className="card-body">
+              <h2 className="card-title">Preview</h2>
+              {selectedImage ? (
+                selectedEffect ? (
+                  <EffectPreview
+                    imageUrl={previewUrl}
+                    effect={selectedEffect}
+                  />
+                ) : (
+                  <div className="text-center p-4 text-base-content/70">
+                    Select an effect to preview
+                  </div>
+                )
+              ) : (
+                <div className="text-center p-4 text-base-content/70">
+                  Upload an image to start
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+        
+        {error && (
+          <div className="alert alert-error mb-4 shadow-lg">
+            <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>{error}</span>
+          </div>
+        )}
+
+        {progress && (
+          <div className="mb-4">
+            <div className="flex justify-between mb-2">
+              <span className="text-sm">{progress.stage}</span>
+              <span className="text-sm">{progress.percent}%</span>
+            </div>
+            <progress 
+              className="progress progress-primary w-full" 
+              value={progress.percent} 
+              max="100"
+            />
+          </div>
+        )}
+        
+        <div className="flex justify-center gap-4">
+          <button 
+            className={`btn btn-primary ${(!selectedImage || !selectedEffect || isProcessing) ? 'btn-disabled' : ''}`}
+            onClick={handleExport}
+            disabled={!selectedImage || !selectedEffect || isProcessing}
+          >
+            {isProcessing ? (
+              <>
+                <span className="loading loading-spinner"></span>
+                Processing...
+              </>
+            ) : (
+              'Export Video'
+            )}
+          </button>
+          {isProcessing && (
+            <button 
+              className="btn btn-error"
+              onClick={() => ffmpegService.abort()}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      </div>
+    </main>
   );
 }
+
