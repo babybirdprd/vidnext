@@ -15,6 +15,15 @@ const nextConfig = {
 					},
 				],
 			},
+			{
+				source: '/ffmpeg/:path*',
+				headers: [
+					{
+						key: 'Cross-Origin-Resource-Policy',
+						value: 'cross-origin'
+					}
+				]
+			}
 		];
 	},
 	webpack: (config) => {

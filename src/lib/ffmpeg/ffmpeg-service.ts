@@ -16,23 +16,26 @@ class FFmpegService {
 		this.abortController = new AbortController();
 		
 		try {
-			const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-			
 			// Set up progress handling
 			this.ffmpeg.on('progress', ({ progress }) => {
 				onProgress?.(Math.round(progress * 100));
 			});
 
-			await this.ffmpeg.load({
-				coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-				wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-				workerURL: await toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'text/javascript'),
+			this.ffmpeg.on('log', ({ message }) => {
+				console.log('FFmpeg Log:', message);
 			});
+
+			await this.ffmpeg.load({
+				coreURL: '/ffmpeg/ffmpeg-core.js',
+				wasmURL: '/ffmpeg/ffmpeg-core.wasm'
+			});
+
 			
 			this.loaded = true;
 		} catch (error) {
+			console.error('FFmpeg load error:', error);
 			this.cleanup();
-			throw new Error(`FFmpeg load failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			throw new Error(`FFmpeg failed to load. Please ensure you have a stable internet connection and try again. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 		}
 	}
 
