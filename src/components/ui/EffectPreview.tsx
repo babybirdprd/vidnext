@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { VideoEffect } from '@/types/effects';
 
 interface EffectPreviewProps {
@@ -11,6 +11,7 @@ interface EffectPreviewProps {
 export function EffectPreview({ imageUrl, effect }: EffectPreviewProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const imageRef = useRef<HTMLImageElement>(null);
+	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (!imageRef.current || !imageUrl || !containerRef.current) return;
@@ -19,44 +20,51 @@ export function EffectPreview({ imageUrl, effect }: EffectPreviewProps) {
 		const { duration, intensity = 50 } = params;
 		const image = imageRef.current;
 
-		// Reset previous animations
-		image.style.animation = 'none';
-		image.style.filter = 'none';
-		void image.offsetWidth;
-
-		const keyframes = generateKeyframes(type, params);
-		const easing = getEasing(params.easing);
-		const animation = `${type.toLowerCase()}-effect ${duration}s ${easing} infinite`;
-
-		// Add keyframes style
-		const styleSheet = document.styleSheets[0];
-		const keyframeName = `${type.toLowerCase()}-effect`;
-
-		// Remove existing keyframes
 		try {
-			for (let i = 0; i < styleSheet.cssRules.length; i++) {
-				const rule = styleSheet.cssRules[i];
-				if (rule instanceof CSSKeyframesRule && rule.name === keyframeName) {
-					styleSheet.deleteRule(i);
-					break;
+			// Reset previous state
+			setError(null);
+			image.style.animation = 'none';
+			image.style.filter = 'none';
+			void image.offsetWidth;
+
+			// Use requestAnimationFrame for smoother animation
+			requestAnimationFrame(() => {
+				const keyframes = generateKeyframes(type, params);
+				const easing = getEasing(params.easing);
+				const animation = `${type.toLowerCase()}-effect ${duration}s ${easing} infinite`;
+
+				// Use a separate style element for keyframes
+				const styleId = `effect-style-${type.toLowerCase()}`;
+				let styleElement = document.getElementById(styleId) as HTMLStyleElement;
+
+				if (!styleElement) {
+					styleElement = document.createElement('style');
+					styleElement.id = styleId;
+					document.head.appendChild(styleElement);
 				}
-			}
-		} catch (e) {
-			console.error('Error cleaning up keyframes:', e);
-		}
 
-		// Add new keyframes
-		try {
-			styleSheet.insertRule(`@keyframes ${keyframeName} ${keyframes}`, styleSheet.cssRules.length);
-		} catch (e) {
-			console.error('Error adding keyframes:', e);
-		}
+				styleElement.textContent = `@keyframes ${type.toLowerCase()}-effect ${keyframes}`;
 
-		// Apply animation and filters
-		image.style.animation = animation;
-		if (type === 'WAVE') {
-			const distortionAmount = Math.min(intensity / 2, 25);
-			image.style.filter = `url("data:image/svg+xml,${generateWaveFilter(distortionAmount)}")`;
+				// Apply optimized transforms
+				image.style.animation = animation;
+				image.style.willChange = 'transform';
+				
+				if (type === 'WAVE') {
+					const distortionAmount = Math.min(intensity / 2, 25);
+					image.style.filter = `url("data:image/svg+xml,${generateWaveFilter(distortionAmount)}")`;
+				}
+			});
+
+			// Cleanup function
+			return () => {
+				const styleElement = document.getElementById(`effect-style-${type.toLowerCase()}`);
+				if (styleElement) {
+					styleElement.remove();
+				}
+			};
+		} catch (err) {
+			console.error('Effect preview error:', err);
+			setError('Failed to apply effect. Please try a different one.');
 		}
 	}, [effect, imageUrl]);
 
@@ -152,7 +160,9 @@ export function EffectPreview({ imageUrl, effect }: EffectPreviewProps) {
 	return (
 		<div className="relative w-full aspect-video bg-base-300 rounded-lg overflow-hidden">
 			<div ref={containerRef} className="absolute inset-0 flex items-center justify-center">
-				{imageUrl ? (
+				{error ? (
+					<div className="text-error">{error}</div>
+				) : imageUrl ? (
 					<img
 						ref={imageRef}
 						src={imageUrl}
@@ -161,8 +171,10 @@ export function EffectPreview({ imageUrl, effect }: EffectPreviewProps) {
 						style={{ 
 							transformOrigin: 'center center',
 							willChange: 'transform',
-							backfaceVisibility: 'hidden'
+							backfaceVisibility: 'hidden',
+							transform: 'translateZ(0)' // Force GPU acceleration
 						}}
+						onError={() => setError('Failed to load image')}
 					/>
 				) : (
 					<div className="text-base-content/50">Upload an image to preview effects</div>

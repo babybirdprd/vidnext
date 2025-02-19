@@ -18,6 +18,15 @@ const nextConfig = {
 						value: "cross-origin",
 					}
 				],
+			},
+			{
+				source: "/ffmpeg/:path*",
+				headers: [
+					{
+						key: "Content-Type",
+						value: "application/wasm",
+					}
+				],
 			}
 		];
 	},
@@ -26,6 +35,10 @@ const nextConfig = {
 			...config.resolve.alias,
 			'fs': false,
 			'path': false,
+		};
+		config.experiments = {
+			...config.experiments,
+			asyncWebAssembly: true,
 		};
 		return config;
 	},

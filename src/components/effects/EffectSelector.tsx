@@ -1,30 +1,64 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { EffectType, EffectParams, VideoEffect } from '@/types/effects';
+
+type EffectCategory = 'Basic' | 'Dynamic' | 'Creative';
+
+const EFFECT_CATEGORIES: Record<EffectCategory, { effects: EffectType[], description: string }> = {
+	'Basic': {
+		effects: ['ZOOM', 'PAN'],
+		description: 'Simple, effective movements'
+	},
+	'Dynamic': {
+		effects: ['PARALLAX', 'DRIFT', 'KEN_BURNS'],
+		description: 'Complex, cinematic effects'
+	},
+	'Creative': {
+		effects: ['WAVE', 'PULSE', 'ROTATION'],
+		description: 'Artistic and unique animations'
+	}
+};
 
 interface EffectSelectorProps {
 	onEffectChange: (effect: VideoEffect) => void;
 	disabled?: boolean;
 }
 
-const EFFECT_PRESETS: Record<string, VideoEffect> = {
+const EFFECT_PRESETS: Record<string, VideoEffect & { description: string }> = {
 	'Gentle Zoom In': {
 		type: 'ZOOM',
-		params: { duration: 5, intensity: 30, direction: 'IN', easing: 'EASE_IN_OUT' }
+		params: { duration: 5, intensity: 30, direction: 'IN', easing: 'EASE_IN_OUT' },
+		description: 'Subtle zoom that draws attention'
 	},
-	'Dramatic Ken Burns': {
+	'Cinematic Ken Burns': {
 		type: 'KEN_BURNS',
-		params: { duration: 8, intensity: 70, easing: 'EASE_IN_OUT' }
+		params: { duration: 8, intensity: 70, easing: 'EASE_IN_OUT' },
+		description: 'Professional pan and zoom effect'
 	},
-	'Smooth Parallax': {
+	'Dynamic Parallax': {
 		type: 'PARALLAX',
-		params: { duration: 6, intensity: 40, easing: 'EASE_IN_OUT' }
+		params: { duration: 6, intensity: 40, easing: 'EASE_IN_OUT' },
+		description: 'Creates depth with layered movement'
 	},
-	'Subtle Pulse': {
+	'Smooth Pulse': {
 		type: 'PULSE',
-		params: { duration: 4, intensity: 25, easing: 'EASE_IN_OUT' }
+		params: { duration: 4, intensity: 25, easing: 'EASE_IN_OUT' },
+		description: 'Gentle breathing animation'
 	}
+};
+
+const PARAMETER_PRESETS = {
+	duration: [
+		{ label: 'Quick', value: 3 },
+		{ label: 'Standard', value: 5 },
+		{ label: 'Long', value: 8 }
+	],
+	intensity: [
+		{ label: 'Subtle', value: 25 },
+		{ label: 'Medium', value: 50 },
+		{ label: 'Strong', value: 75 }
+	]
 };
 
 const EFFECT_DESCRIPTIONS: Record<EffectType, string> = {
@@ -40,6 +74,22 @@ const EFFECT_DESCRIPTIONS: Record<EffectType, string> = {
 
 export function EffectSelector({ onEffectChange, disabled = false }: EffectSelectorProps) {
 	const [selectedEffect, setSelectedEffect] = useState<VideoEffect>(EFFECT_PRESETS['Gentle Zoom In']);
+	const [activeCategory, setActiveCategory] = useState<EffectCategory>('Basic');
+
+	// Add keyboard shortcuts
+	useEffect(() => {
+		const handleKeyPress = (e: KeyboardEvent) => {
+			if (e.altKey && !disabled) {
+				switch(e.key) {
+					case '1': setActiveCategory('Basic'); break;
+					case '2': setActiveCategory('Dynamic'); break;
+					case '3': setActiveCategory('Creative'); break;
+				}
+			}
+		};
+		window.addEventListener('keydown', handleKeyPress);
+		return () => window.removeEventListener('keydown', handleKeyPress);
+	}, [disabled]);
 
 	useEffect(() => {
 		// Reset direction when switching between effect types
@@ -76,21 +126,43 @@ export function EffectSelector({ onEffectChange, disabled = false }: EffectSelec
 
 	return (
 		<div className="space-y-6">
-			<div className="flex gap-2 mb-4 overflow-x-auto pb-2">
-				{Object.entries(EFFECT_PRESETS).map(([name, preset]) => (
-					<button
-						key={name}
-						className={`btn btn-sm ${selectedEffect.type === preset.type ? 'btn-primary' : 'btn-ghost'}`}
-						onClick={() => {
-							setSelectedEffect(preset);
-							onEffectChange(preset);
-						}}
-						disabled={disabled}
-					>
-						{name}
-					</button>
+			{/* Categories with tooltips */}
+			<div className="tabs tabs-boxed">
+				{Object.entries(EFFECT_CATEGORIES).map(([category, { description }], index) => (
+					<div key={category} className="tooltip" data-tip={description}>
+						<button
+							className={`tab ${activeCategory === category ? 'tab-active' : ''}`}
+							onClick={() => setActiveCategory(category as EffectCategory)}
+							disabled={disabled}
+						>
+							{category}
+							<span className="ml-2 opacity-50 text-xs">Alt+{index + 1}</span>
+						</button>
+					</div>
 				))}
 			</div>
+
+			{/* Quick presets with visual previews */}
+			<div className="grid grid-cols-2 gap-3">
+				{Object.entries(EFFECT_PRESETS)
+					.filter(([_, preset]) => EFFECT_CATEGORIES[activeCategory].effects.includes(preset.type))
+					.map(([name, preset]) => (
+						<div key={name} className="card bg-base-200 hover:bg-base-300 transition-colors">
+							<button
+								className="card-body p-3"
+								onClick={() => {
+									setSelectedEffect(preset);
+									onEffectChange(preset);
+								}}
+								disabled={disabled}
+							>
+								<h3 className="card-title text-sm">{name}</h3>
+								<p className="text-xs opacity-70">{preset.description}</p>
+							</button>
+						</div>
+					))}
+			</div>
+
 
 			<div className="form-control">
 				<label className="label">
@@ -119,7 +191,18 @@ export function EffectSelector({ onEffectChange, disabled = false }: EffectSelec
 				<div className="form-control">
 					<label className="label">
 						<span className="label-text">Duration</span>
-						<span className="label-text-alt">{selectedEffect.params.duration}s</span>
+						<div className="flex gap-1">
+							{PARAMETER_PRESETS.duration.map(preset => (
+								<button
+									key={preset.label}
+									className="btn btn-xs"
+									onClick={() => handleParamChange('duration', preset.value)}
+									disabled={disabled}
+								>
+									{preset.label}
+								</button>
+							))}
+						</div>
 					</label>
 					<input
 						type="range"
@@ -132,7 +215,7 @@ export function EffectSelector({ onEffectChange, disabled = false }: EffectSelec
 					/>
 					<div className="w-full flex justify-between text-xs px-2 mt-1">
 						<span>1s</span>
-						<span>15s</span>
+						<span>{selectedEffect.params.duration}s</span>
 						<span>30s</span>
 					</div>
 				</div>
